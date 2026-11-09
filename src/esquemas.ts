@@ -208,3 +208,11 @@ export function respuestaError(error: string): string {
   const resultado: Resultado<never> = { ok: false, error };
   return JSON.stringify(resultado);
 }
+
+// ---------------------------------------------------------------------
+// BLOQUE 7 — Contexto que recibe cada herramienta
+// ---------------------------------------------------------------------
+
+// "directory" es la raíz del proyecto: las herramientas resuelven sus rutas
+// desde ahí y nunca usan rutas absolutas (regla del PRD).
+export type ContextoHerramienta = { directory: string; sessionId: string };
