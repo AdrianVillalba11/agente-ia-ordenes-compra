@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    // Lenguaje y módulos: TypeScript moderno, resuelto por Bun
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "types": ["bun"],
+
+    // React para el front de chat
+    "jsx": "react-jsx",
+
+    // Modo estricto: el compilador nos avisa de errores y de usos de "any" implícitos
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+
+    // Bun ejecuta TypeScript directo; tsc solo se usa para revisar tipos
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true
+  },
+  "include": ["src", "web", "demo.ts"]
+}

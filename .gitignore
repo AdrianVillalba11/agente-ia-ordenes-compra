@@ -1,0 +1,15 @@
+# Dependencias instaladas
+node_modules/
+
+# Resultados generados al ejecutar (el PRD pide no entregarlos)
+out/
+
+# Secretos: la clave del modelo nunca se sube al repositorio
+.env
+.env.*
+!.env.example
+
+# Archivos de sistema y editores
+.DS_Store
+Thumbs.db
+*.log
