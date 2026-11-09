@@ -18,7 +18,7 @@
 //   5. Montos y NIT se limpian con las utilidades de normalizar.ts.
 // =====================================================================
 
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import {
@@ -31,6 +31,7 @@ import {
   type Paquete,
   type Resultado,
 } from "../esquemas.ts";
+import { describirErrorZod, leerJsonValidado, leerTextoOpcional } from "./archivos.ts";
 import { normalizarNit, normalizarTexto, parsearMonto, soloDia } from "./normalizar.ts";
 
 // ---------------------------------------------------------------------
@@ -44,46 +45,11 @@ const RUTA_SOLICITUDES = "fixtures/reto-03/solicitudes";
 export const NOMBRE_CASO_VALIDO = /^[A-Za-z0-9-]+$/;
 
 // ---------------------------------------------------------------------
-// BLOQUE 2 — Ayudantes de lectura de archivos
+// BLOQUE 2 — Ayudante de búsqueda en texto
 // ---------------------------------------------------------------------
 
-// Lee un archivo de texto; devuelve null si no existe o no se puede leer.
-// Se quita el BOM inicial, que rompería JSON.parse.
-function leerTextoOpcional(ruta: string): string | null {
-  try {
-    if (!existsSync(ruta)) return null;
-    return readFileSync(ruta, "utf-8").replace(/^\uFEFF/, "");
-  } catch {
-    return null;
-  }
-}
-
-// Describe un error de zod en una frase: "valor_total: expected number, ..."
-function describirErrorZod(error: z.ZodError): string {
-  return error.issues
-    .map((problema) => `${problema.path.map(String).join(".") || "(raíz)"}: ${problema.message}`)
-    .join("; ");
-}
-
-// Lee un JSON y lo valida contra su esquema. Devuelve un error legible
-// (nunca lanza) si el archivo falta, está roto o tiene datos inválidos.
-function leerJsonValidado<T>(carpeta: string, nombre: string, esquema: z.ZodType<T>): Resultado<T> {
-  const texto = leerTextoOpcional(join(carpeta, nombre));
-  if (texto === null) return { ok: false, error: `Falta el archivo ${nombre}.` };
-
-  let crudo: unknown;
-  try {
-    crudo = JSON.parse(texto);
-  } catch {
-    return { ok: false, error: `${nombre} no es un JSON válido.` };
-  }
-
-  const resultado = esquema.safeParse(crudo);
-  if (!resultado.success) {
-    return { ok: false, error: `${nombre} tiene datos inválidos (${describirErrorZod(resultado.error)}).` };
-  }
-  return { ok: true, data: resultado.data };
-}
+// (La lectura segura de archivos JSON y de texto vive en archivos.ts,
+// porque también la usa la carga de maestros.)
 
 // Busca una línea con una expresión regular y devuelve el primer grupo, sin espacios
 function buscar(texto: string, expresion: RegExp): string | null {
@@ -195,6 +161,24 @@ export function esAprobado(cuerpo: string): boolean {
   const dice = /\baprobado\b/.test(texto);
   const niega = /\b(no|sin|nunca|ni)\s+(\w+\s+){0,2}aprobado\b/.test(texto);
   return dice && !niega;
+}
+
+// ---------------------------------------------------------------------
+// BLOQUE 6B — Comparar dos paquetes
+// ---------------------------------------------------------------------
+
+// Serializa un valor con las llaves ordenadas, para que dos objetos iguales
+// den el mismo texto aunque sus llaves vengan en otro orden.
+function serializarEstable(valor: unknown): string {
+  return JSON.stringify(valor, (_llave, contenido: unknown) => {
+    if (contenido === null || typeof contenido !== "object" || Array.isArray(contenido)) return contenido;
+    return Object.fromEntries(Object.entries(contenido as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)));
+  });
+}
+
+// ¿Son idénticos dos paquetes? Se usa para detectar que el modelo alteró un valor.
+export function paquetesIguales(a: Paquete, b: Paquete): boolean {
+  return serializarEstable(a) === serializarEstable(b);
 }
 
 // ---------------------------------------------------------------------

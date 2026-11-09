@@ -172,6 +172,42 @@ export const EsquemaCondicionPago = z.object({
 });
 
 // ---------------------------------------------------------------------
+// BLOQUE 4B — Resultado de la validación (lo que devuelve oc_validar)
+// ---------------------------------------------------------------------
+
+// Un hallazgo es un problema o duda detectado por una regla de control.
+// Siempre trae el código de la regla, la razón con los valores y qué hacer.
+export const EsquemaHallazgo = z.object({
+  codigo: z.string(), // "RC1", "RC2", ...
+  detalle: z.string(),
+  accion_sugerida: z.string(),
+});
+
+// Un valor que el agente completó desde un maestro, con su fuente (trazabilidad).
+export const EsquemaDerivado = z.object({
+  valor: z.string(),
+  fuente: z.string(),
+});
+
+// Lo que el agente completó por su cuenta. Se pasa a oc_construir_payload.
+export const EsquemaDerivados = z.object({
+  // Proveedor encontrado en el maestro (de ahí sale el código SAP)
+  proveedor: z
+    .object({ codigo_sap: z.string(), nit: z.string(), nombre: z.string() })
+    .optional(),
+  indicador_iva: EsquemaDerivado.optional(),
+  condiciones_pago: EsquemaDerivado.optional(),
+});
+
+export const EsquemaResultadoValidacion = z.object({
+  apta: z.boolean(), // true si no hay ningún bloqueo
+  bloqueos: z.array(EsquemaHallazgo), // impiden crear la OC
+  confirmaciones: z.array(EsquemaHallazgo), // permiten crear solo si un humano confirma
+  derivados: EsquemaDerivados,
+  retroactiva: z.boolean(), // RC8: la OC se pide después de recibir la factura
+});
+
+// ---------------------------------------------------------------------
 // BLOQUE 5 — Tipos de TypeScript derivados de los esquemas
 // ---------------------------------------------------------------------
 
@@ -188,6 +224,9 @@ export type Proveedor = z.infer<typeof EsquemaProveedor>;
 export type CentroCosto = z.infer<typeof EsquemaCentroCosto>;
 export type IndicadorIva = z.infer<typeof EsquemaIndicadorIva>;
 export type CondicionPago = z.infer<typeof EsquemaCondicionPago>;
+export type Hallazgo = z.infer<typeof EsquemaHallazgo>;
+export type Derivados = z.infer<typeof EsquemaDerivados>;
+export type ResultadoValidacion = z.infer<typeof EsquemaResultadoValidacion>;
 
 // ---------------------------------------------------------------------
 // BLOQUE 6 — Contrato de respuesta de las herramientas
