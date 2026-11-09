@@ -7,7 +7,9 @@
   "scripts": {
     "demo": "bun run demo.ts",
     "dev": "bun run src/server.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "verificar": "bun run typecheck && bun test"
   },
   "dependencies": {
     "react": "^19.3.1",
