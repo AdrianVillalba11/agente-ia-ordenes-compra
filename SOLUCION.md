@@ -183,10 +183,15 @@ Hoy el agente **no las rechaza ni las oculta**: las marca (`retroactiva = true` 
 | `demo.ts` sin modelo | Hecho | 6 de 6 casos y 5 de 5 comprobaciones; sale con código 0 |
 | Chat web con pasos, banner y botones de confirmación | Hecho | Verificado en navegador (escritorio, celular, modo claro y oscuro) |
 | Modelo real en URL pública | Hecho | Probado con sol-001, 002, 004, 005 y una pregunta de conocimiento |
-| Bonus `modulo/` | No hecho | Fuera del alcance por tiempo |
+| Bonus `modulo/` (+10) | Hecho | `agent.md`, `tools/oc.ts` y `skill/ordenes-compra/SKILL.md`; son las mismas piezas de la aplicación (ver abajo) |
 | Lectura real de `.xlsx` y PDF | No hecho | Los fixtures traen JSON y texto (P1 opcional) |
 
-**Verificación automática:** 471 pruebas en 19 archivos y tipos estrictos sin errores (`bun run verificar`). Además se rompieron a propósito 8 defensas del agente y 10 del servidor, y las pruebas detectaron las 18.
+**Módulo reutilizable (`modulo/`).** Sin copias propias, para que no puedan divergir:
+- `tools/oc.ts` reexporta el mismo módulo de herramientas de la aplicación (`src/tools/oc.ts`); una prueba comprueba que cada herramienta es el mismo objeto.
+- `agent.md` y `skill/ordenes-compra/SKILL.md` se generan con `bun run modulo` a partir de `agent/prompt.md` y `src/knowledge/ordenes-compra.md` (los archivos que lee la aplicación), agregándoles solo la cabecera: descripción, modo primario y permisos que niegan editar y ejecutar comandos, en el agente; nombre y descripción, en la skill. Una prueba falla si los archivos del módulo dejan de coincidir con su origen.
+- Límite: el módulo no depende del servidor, del ciclo ni del modelo, pero sí del código del repositorio (dominio y adaptador SAP); para usarlo en otra plataforma se importa desde este repositorio, no se copia suelto.
+
+**Verificación automática:** 477 pruebas en 20 archivos y tipos estrictos sin errores (`bun run verificar`). Además se rompieron a propósito 8 defensas del agente y 10 del servidor, y las pruebas detectaron las 18.
 
 **Qué falta para producción:** adaptador SAP real (sección 6), maestros consultados en vivo, autenticación por usuario, almacén compartido de sesiones y límites para varias réplicas, firma de la evidencia, y los controles extra de la sección 12.
 

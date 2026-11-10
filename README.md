@@ -35,7 +35,8 @@ Ejecuta las herramientas sobre los 6 casos de `fixtures/reto-03/`, sin modelo, s
 
 | Comando | Qué hace |
 |---|---|
-| `bun run verificar` | Revisa tipos y corre las 471 pruebas |
+| `bun run verificar` | Revisa tipos y corre las 477 pruebas |
+| `bun run modulo` | Regenera `modulo/agent.md` y `modulo/skill/.../SKILL.md` desde el prompt y el conocimiento de la aplicación |
 | `bun test` | Solo las pruebas |
 | `bun run humo` | Prueba la conexión real con el modelo y un caso completo, sol-001 (necesita `LLM_API_KEY`; gasta tokens) |
 | `bun run humo -- --completo` | Además, la confirmación humana con sol-004 |
@@ -73,6 +74,7 @@ src/agente/                Ciclo del agente, confirmación humana y sesiones
 src/llm/                   Adaptador del modelo (Gemini)
 src/server.ts              Servidor HTTP del chat
 web/                       Chat en React
+modulo/                    Bonus: el agente empaquetado (agent.md, tools/oc.ts, skill/ordenes-compra/SKILL.md)
 demo.ts                    Demo sin modelo
 fixtures/reto-03/          Datos de entrada entregados por el reto
 ```
