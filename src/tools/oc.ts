@@ -15,23 +15,31 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
+import { leerTextoOpcional } from "../dominio/archivos.ts";
 import { validarPaquete } from "../dominio/controles.ts";
-import { construirEvidencia } from "../dominio/evidencia.ts";
+import { hayPendienteIgual, registrarControl, type FilaControl } from "../dominio/control.ts";
+import { construirEvidencia, evidenciaCoincide } from "../dominio/evidencia.ts";
 import { generarPdfEvidencia } from "../dominio/evidencia-pdf.ts";
 import { cargarMaestros } from "../dominio/maestros.ts";
 import { construirOrden } from "../dominio/orden.ts";
 import { leerPaquete, NOMBRE_CASO_VALIDO, valoresIguales } from "../dominio/paquete.ts";
 import {
   EsquemaDerivados,
+  EsquemaOrdenCompra,
   EsquemaPaquete,
   respuestaError,
   respuestaOk,
+  respuestaRequiereConfirmacion,
   type ContextoHerramienta,
   type Derivados,
+  type Hallazgo,
+  type OrdenCompra,
   type Paquete,
   type Resultado,
   type ResultadoValidacion,
 } from "../esquemas.ts";
+import { ErrorSap } from "../sap/adapter.ts";
+import { SapMock } from "../sap/mock.ts";
 
 // ---------------------------------------------------------------------
 // BLOQUE 1 — Piezas compartidas por las herramientas
@@ -223,6 +231,148 @@ export const generar_evidencia = {
       });
     } catch (error) {
       return errorInesperado("al generar la evidencia", error);
+    }
+  },
+};
+
+// ---------------------------------------------------------------------
+// BLOQUE 6 — oc_crear
+// ---------------------------------------------------------------------
+
+// Lista legible de hallazgos para los mensajes de error
+function describirHallazgos(hallazgos: Hallazgo[]): string {
+  return hallazgos.map((h) => `- ${h.codigo}: ${h.detalle} Acción: ${h.accion_sugerida}`).join("\n");
+}
+
+export const crear = {
+  description:
+    "Crea la orden de compra de un caso en el SAP simulado si no tiene bloqueos, tiene su evidencia de aprobación y las confirmaciones pendientes fueron confirmadas por el usuario; si la solicitud ya tiene orden, devuelve la existente.",
+  args: {
+    caso: ARGUMENTO_CASO,
+    payload: EsquemaOrdenCompra.optional().describe(
+      "Opcional. Si se envía, debe ser idéntico a la orden devuelta por oc_construir_payload; siempre se crea la orden reconstruida desde el disco.",
+    ),
+    confirmado: z
+      .boolean()
+      .optional()
+      .describe(
+        "Solo true si el usuario confirmó de forma explícita, en su mensaje más reciente, las confirmaciones que se le mostraron. Nunca lo deduzcas ni lo pongas por tu cuenta.",
+      ),
+  },
+  async execute(
+    args: { caso: string; payload?: OrdenCompra; confirmado?: boolean },
+    ctx: ContextoHerramienta,
+  ): Promise<string> {
+    try {
+      // 0. Preparar: leer, validar y reconstruir todo desde el disco
+      const preparado = prepararCaso(args.caso, undefined, undefined, ctx);
+      if (!preparado.ok) return respuestaError(preparado.error);
+      const { paquete, validacion } = preparado.data;
+
+      const solicitudId = paquete.solicitud.solicitud_id;
+      const ahora = ctx.ahora ?? (() => new Date());
+      const sap = new SapMock(ctx.directory, ahora);
+      const codigos = (hallazgos: Hallazgo[]): string[] => hallazgos.map((h) => h.codigo);
+
+      // Deja constancia del intento en out/control.csv
+      const registrar = (
+        resultado: FilaControl["resultado"],
+        numeroOc: string | null,
+        bloqueos: string[] = codigos(validacion.bloqueos),
+      ): void => {
+        registrarControl(ctx.directory, {
+          solicitud_id: solicitudId,
+          resultado,
+          numero_oc: numeroOc,
+          retroactiva: validacion.retroactiva,
+          bloqueos,
+          confirmaciones: codigos(validacion.confirmaciones),
+          ts: ahora().toISOString(),
+        });
+      };
+
+      // 1. Idempotencia: si la solicitud ya tiene orden, se devuelve esa
+      const existente = await sap.buscarOrdenPorReferencia(solicitudId);
+      if (existente !== null) {
+        registrar("ya_existente", existente.numero_oc);
+        return respuestaOk({ numero_oc: existente.numero_oc, fecha: existente.fecha, idempotente: true });
+      }
+
+      // 2. Los bloqueos no se pueden saltar, ni siquiera con confirmado: true
+      if (!validacion.apta) {
+        registrar("bloqueada", null);
+        return respuestaError(
+          `El caso ${args.caso} tiene bloqueos y no se puede crear la OC:\n${describirHallazgos(validacion.bloqueos)}`,
+        );
+      }
+
+      // 3. Reconstruir la orden desde el disco; el modelo no puede alterarla
+      const evidencia = construirEvidencia(args.caso, ctx.directory);
+      if (!evidencia.ok) return respuestaError(evidencia.error);
+      const construida = construirOrden(paquete, validacion, evidencia.data.sha256);
+      if (!construida.ok) return respuestaError(construida.error);
+      const orden = construida.data.orden;
+      if (args.payload !== undefined && !valoresIguales(args.payload, orden)) {
+        return respuestaError(
+          `El payload enviado no coincide con la orden del caso ${args.caso}. Se crea siempre la orden reconstruida desde el disco: usa exactamente la que devolvió oc_construir_payload.`,
+        );
+      }
+
+      // 4. La evidencia de aprobación debe existir y ser la de esta orden
+      const evidenciaEscrita = leerTextoOpcional(join(ctx.directory, "out", args.caso, "aprobacion.txt"));
+      if (evidenciaEscrita === null) {
+        return respuestaError(
+          `Falta la evidencia de aprobación (out/${args.caso}/aprobacion.txt). Ejecuta oc_generar_evidencia y vuelve a intentar.`,
+        );
+      }
+      if (!evidenciaCoincide(evidenciaEscrita, orden.aprobador.evidencia_sha256)) {
+        return respuestaError(
+          `La evidencia out/${args.caso}/aprobacion.txt no coincide con la aprobación del caso (fue alterada o es de otra aprobación). Vuelve a ejecutar oc_generar_evidencia.`,
+        );
+      }
+
+      // 5. Confirmaciones: solo se aceptan si antes se mostraron
+      const pendientes = validacion.confirmaciones;
+      if (pendientes.length > 0) {
+        if (args.confirmado !== true) {
+          registrar("pendiente_confirmacion", null);
+          return respuestaRequiereConfirmacion(
+            `Requiere confirmación humana antes de crear la OC de ${solicitudId}. Muestra esto al usuario y espera su respuesta:\n${describirHallazgos(pendientes)}`,
+            pendientes,
+          );
+        }
+        if (!hayPendienteIgual(ctx.directory, solicitudId, codigos(pendientes))) {
+          registrar("pendiente_confirmacion", null);
+          return respuestaRequiereConfirmacion(
+            `No se puede confirmar algo que aún no se mostró. Muestra primero al usuario las confirmaciones pendientes y espera su respuesta; solo entonces vuelve a llamar con confirmado: true.\n${describirHallazgos(pendientes)}`,
+            pendientes,
+          );
+        }
+      }
+
+      // 6. SAP debe reconocer al proveedor como activo, con el mismo código
+      const proveedorSap = await sap.consultarProveedor(orden.proveedor.nit);
+      if (proveedorSap === null || !proveedorSap.activo || proveedorSap.codigo_sap !== orden.proveedor.codigo_sap) {
+        registrar("bloqueada", null, ["SAP"]);
+        return respuestaError(
+          `SAP no reconoce al proveedor ${orden.proveedor.nombre} (NIT ${orden.proveedor.nit}) como activo con el código ${orden.proveedor.codigo_sap}.`,
+        );
+      }
+
+      // 7. Crear. Las excepciones quedan confirmadas por la sesión que las aceptó.
+      const confirmadoPor = `sesion:${ctx.sessionId}`;
+      const ordenFinal: OrdenCompra = {
+        ...orden,
+        excepciones: orden.excepciones.map((e) => ({ ...e, confirmado_por: confirmadoPor })),
+      };
+      const creada = await sap.crearOrden(ordenFinal);
+      const yaExistia = creada.ya_existia === true; // otra llamada simultánea pudo crearla antes
+      registrar(yaExistia ? "ya_existente" : "creada", creada.numero_oc);
+      return respuestaOk({ numero_oc: creada.numero_oc, fecha: creada.fecha, idempotente: yaExistia });
+    } catch (error) {
+      // Un error esperado de SAP (archivo dañado) se muestra tal cual
+      if (error instanceof ErrorSap) return respuestaError(error.message);
+      return errorInesperado("al crear la orden", error);
     }
   },
 };

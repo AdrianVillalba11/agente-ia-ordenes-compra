@@ -248,10 +248,19 @@ export function respuestaError(error: string): string {
   return JSON.stringify(resultado);
 }
 
+// Un error especial: la acción necesita la confirmación de una persona. Además del
+// mensaje lleva la marca "requiere_confirmacion" y la lista de lo que hay que
+// confirmar, para que el chat pueda resaltarlo y mostrarlo.
+export function respuestaRequiereConfirmacion(error: string, confirmaciones: Hallazgo[]): string {
+  return JSON.stringify({ ok: false, error, requiere_confirmacion: true, confirmaciones });
+}
+
 // ---------------------------------------------------------------------
 // BLOQUE 7 — Contexto que recibe cada herramienta
 // ---------------------------------------------------------------------
 
 // "directory" es la raíz del proyecto: las herramientas resuelven sus rutas
 // desde ahí y nunca usan rutas absolutas (regla del PRD).
-export type ContextoHerramienta = { directory: string; sessionId: string };
+// "ahora" es el reloj; si no se indica se usa la hora real. Las pruebas y la
+// demo lo fijan para que los resultados sean exactos y repetibles.
+export type ContextoHerramienta = { directory: string; sessionId: string; ahora?: () => Date };

@@ -55,6 +55,27 @@ export function calcularSha256(contenido: string): string {
 }
 
 // ---------------------------------------------------------------------
+// BLOQUE 2B — Comprobar una evidencia ya escrita
+// ---------------------------------------------------------------------
+
+// Texto que separa el contenido de la línea del hash en aprobacion.txt
+export const SEPARADOR_HASH = "\n\n---\nsha256: ";
+
+// ¿El archivo aprobacion.txt es íntegro y corresponde a este hash?
+// Se recalcula el hash del contenido que está en el archivo: si alguien cambió una
+// letra, o el archivo es de otra aprobación, no coincide. Se tolera que el archivo
+// haya sido guardado con saltos de línea de Windows.
+export function evidenciaCoincide(textoArchivo: string, shaEsperado: string): boolean {
+  const normalizado = textoArchivo.replace(/\r\n/g, "\n");
+  const indice = normalizado.lastIndexOf(SEPARADOR_HASH);
+  if (indice === -1) return false;
+
+  const contenido = normalizado.slice(0, indice);
+  const declarado = normalizado.slice(indice + SEPARADOR_HASH.length).trim();
+  return calcularSha256(contenido) === shaEsperado && declarado === shaEsperado;
+}
+
+// ---------------------------------------------------------------------
 // BLOQUE 3 — Construcción de la evidencia
 // ---------------------------------------------------------------------
 
