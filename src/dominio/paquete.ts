@@ -39,7 +39,7 @@ import { normalizarNit, normalizarTexto, parsearMonto, soloDia } from "./normali
 // ---------------------------------------------------------------------
 
 // Carpeta de los casos, relativa a la raíz del proyecto
-const RUTA_SOLICITUDES = "fixtures/reto-03/solicitudes";
+export const RUTA_SOLICITUDES = "fixtures/reto-03/solicitudes";
 
 // Solo letras, números y guiones: impide "../", "/" y "\" en el nombre del caso
 export const NOMBRE_CASO_VALIDO = /^[A-Za-z0-9-]+$/;
@@ -176,8 +176,9 @@ function serializarEstable(valor: unknown): string {
   });
 }
 
-// ¿Son idénticos dos paquetes? Se usa para detectar que el modelo alteró un valor.
-export function paquetesIguales(a: Paquete, b: Paquete): boolean {
+// ¿Son idénticos dos valores (paquetes, derivados...)? Se usa para detectar que
+// el modelo alteró algo que debía enviar tal cual.
+export function valoresIguales(a: unknown, b: unknown): boolean {
   return serializarEstable(a) === serializarEstable(b);
 }
 
