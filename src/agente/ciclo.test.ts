@@ -16,80 +16,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { leerControl } from "../dominio/control.ts";
 import type { OrdenCompra } from "../esquemas.ts";
-import {
-  ErrorLlm,
-  type AdaptadorLlm,
-  type DefinicionHerramienta,
-  type MensajeLlm,
-  type OpcionesLlm,
-  type RespuestaLlm,
-} from "../llm/adapter.ts";
+import { ErrorLlm, type MensajeLlm } from "../llm/adapter.ts";
+import { decir, fallar, flujoCompleto, ModeloGuionado, pedir, usoDe, type Paso } from "../pruebas/modelo-guionado.ts";
 import { Agente, crearSesion, type DependenciasAgente, type RespuestaTurno, type Sesion } from "./ciclo.ts";
-
-// ---------------------------------------------------------------------
-// BLOQUE 1 — El modelo falso y sus ayudantes
-// ---------------------------------------------------------------------
-
-type Peticion = { mensajes: MensajeLlm[]; herramientas: DefinicionHerramienta[]; opciones: OpcionesLlm };
-type Paso = (peticion: Peticion) => RespuestaLlm | Error | Promise<RespuestaLlm | Error>;
-
-// Un modelo que sigue un guion: en cada llamada ejecuta el siguiente paso
-class ModeloGuionado implements AdaptadorLlm {
-  readonly proveedor = "falso";
-  readonly modelo = "guionado";
-  readonly peticiones: Peticion[] = [];
-  private readonly pasos: Paso[];
-
-  constructor(pasos: Paso[]) {
-    this.pasos = [...pasos];
-  }
-
-  agregar(...pasos: Paso[]): void {
-    this.pasos.push(...pasos);
-  }
-
-  async enviar(mensajes: MensajeLlm[], herramientas: DefinicionHerramienta[], opciones: OpcionesLlm): Promise<RespuestaLlm> {
-    // Se guarda una copia de lo que el modelo recibió en ese momento (el historial sigue creciendo)
-    const peticion: Peticion = { mensajes: structuredClone(mensajes), herramientas, opciones };
-    this.peticiones.push(peticion);
-
-    const paso = this.pasos.shift();
-    if (paso === undefined) throw new Error("El guion del modelo falso se agotó");
-    const resultado = await paso(peticion);
-    if (resultado instanceof Error) throw resultado;
-    return resultado;
-  }
-}
-
-let contadorIds = 0;
-const usoDe = (tokens: number) => ({ entrada: tokens, salida: 0, total: tokens });
-
-// El modelo responde con texto
-const decir =
-  (texto: string, tokens = 100): Paso =>
-  () => ({ bloques: [{ tipo: "texto", texto }], uso: usoDe(tokens) });
-
-// El modelo pide una o varias herramientas a la vez
-const pedir =
-  (...llamadas: [string, Record<string, unknown>][]): Paso =>
-  () => ({
-    bloques: llamadas.map(([nombre, argumentos]) => ({ tipo: "uso_herramienta" as const, id: `u${++contadorIds}`, nombre, argumentos })),
-    uso: usoDe(100),
-  });
-
-// El modelo falla
-const fallar =
-  (error: Error): Paso =>
-  () =>
-    error;
-
-// El recorrido normal de un caso sin bloqueos: leer, validar, armar la OC y la evidencia, y pedir crearla
-const flujoCompleto = (caso: string): Paso[] => [
-  pedir(["oc_leer_paquete", { caso }]),
-  pedir(["oc_validar", { caso }]),
-  pedir(["oc_construir_payload", { caso }], ["oc_generar_evidencia", { caso }]), // dos a la vez
-  pedir(["oc_crear", { caso }]),
-];
 
 // ---------------------------------------------------------------------
 // BLOQUE 2 — Entorno de prueba
@@ -708,6 +637,25 @@ describe("problemaDeHistorial (el ayudante que valida los historiales)", () => {
         { rol: "usuario", bloques: [{ tipo: "resultado_herramienta", idUso: "otro", nombre: "oc_validar", resultado: {} }] },
       ]),
     ).not.toBeNull(); // el resultado no es el de la llamada
+  });
+});
+
+// ---------------------------------------------------------------------
+// BLOQUE 11 — Una sesión con su propia carpeta de trabajo
+// ---------------------------------------------------------------------
+
+describe("sesión con carpeta propia", () => {
+  test("las herramientas trabajan en la carpeta de la sesión, no en la del agente", async () => {
+    const { agente, raiz } = crearEntorno([...flujoCompleto("sol-001"), decir("Listo.")]);
+    const propia = mkdtempSync(join(tmpdir(), "oc-ciclo-propia-"));
+    raicesTemporales.push(propia);
+    cpSync(join(RAIZ, "fixtures"), join(propia, "fixtures"), { recursive: true });
+
+    const sesion = crearSesion("sesion-propia", propia);
+    await agente.procesarMensaje(sesion, "Procesa sol-001");
+
+    expect(leerOrdenes(propia)).toHaveLength(1); // la OC quedó en la carpeta de la sesión
+    expect(leerOrdenes(raiz)).toEqual([]); // y no en la del agente
   });
 });
 

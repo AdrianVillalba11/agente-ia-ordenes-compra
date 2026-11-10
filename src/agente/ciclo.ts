@@ -74,10 +74,22 @@ export type Sesion = {
   tokensUsados: number;
   pendientes: Map<string, string[]>; // caso -> códigos de las confirmaciones que se mostraron y esperan respuesta
   ocupada: boolean; // hay un mensaje en proceso
+  // La carpeta de trabajo propia de esta sesión (con sus fixtures y su SAP simulado). Si no tiene,
+  // se usa la raíz del agente. Así dos visitantes no comparten órdenes ni confirmaciones.
+  raiz?: string;
 };
 
-export function crearSesion(id: string): Sesion {
-  return { id, mensajes: [], visibles: [], turno: 0, tokensUsados: 0, pendientes: new Map(), ocupada: false };
+export function crearSesion(id: string, raiz?: string): Sesion {
+  return {
+    id,
+    mensajes: [],
+    visibles: [],
+    turno: 0,
+    tokensUsados: 0,
+    pendientes: new Map(),
+    ocupada: false,
+    ...(raiz === undefined ? {} : { raiz }),
+  };
 }
 
 // Lo que devuelve cada turno (el PRD pide reply, toolCalls y needsConfirmation)
@@ -318,7 +330,11 @@ export class Agente {
       confirmadoPorUsuario = true;
     }
 
-    const contexto: ContextoHerramienta = { directory: this.raiz, sessionId: sesion.id, ...(this.ahora === undefined ? {} : { ahora: this.ahora }) };
+    const contexto: ContextoHerramienta = {
+      directory: sesion.raiz ?? this.raiz, // la carpeta propia de la sesión, si la tiene
+      sessionId: sesion.id,
+      ...(this.ahora === undefined ? {} : { ahora: this.ahora }),
+    };
     const ejecucion = await ejecutarHerramienta(uso.nombre, argumentos, contexto);
 
     // Se lleva la cuenta de lo que quedó esperando confirmación
