@@ -266,7 +266,7 @@ function controlRC6(paquete: Paquete, proveedor: Proveedor | undefined, acc: Acu
   confirmar(
     acc,
     "RC6",
-    `La solicitud no trae indicador de IVA; se propone ${proveedor.indicador_iva_default}, el predeterminado de ${proveedor.nombre}.`,
+    `La solicitud no trae indicador de IVA; se propone ${proveedor.indicador_iva_default} (el predeterminado de ${proveedor.nombre}).`,
     "Confirmar el indicador de IVA propuesto.",
   );
 }
