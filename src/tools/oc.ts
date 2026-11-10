@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { validarPaquete } from "../dominio/controles.ts";
 import { construirEvidencia } from "../dominio/evidencia.ts";
+import { generarPdfEvidencia } from "../dominio/evidencia-pdf.ts";
 import { cargarMaestros } from "../dominio/maestros.ts";
 import { construirOrden } from "../dominio/orden.ts";
 import { leerPaquete, NOMBRE_CASO_VALIDO, valoresIguales } from "../dominio/paquete.ts";
@@ -174,6 +175,54 @@ export const construir_payload = {
       });
     } catch (error) {
       return errorInesperado("al construir la orden", error);
+    }
+  },
+};
+
+// ---------------------------------------------------------------------
+// BLOQUE 5 — oc_generar_evidencia
+// ---------------------------------------------------------------------
+
+export const generar_evidencia = {
+  description:
+    "Genera la evidencia de aprobación de un caso en out/<caso>/aprobacion.txt y aprobacion.pdf, con encabezados, cuerpo y sha256 del contenido, y devuelve las rutas y el hash.",
+  args: { caso: ARGUMENTO_CASO },
+  async execute(args: { caso: string }, ctx: ContextoHerramienta): Promise<string> {
+    try {
+      // La evidencia es una copia fiel del correo de aprobación: no depende de la validación
+      const evidencia = construirEvidencia(args.caso, ctx.directory);
+      if (!evidencia.ok) return respuestaError(evidencia.error);
+
+      // El .txt es lo obligatorio: se escribe primero
+      const carpetaSalida = join(ctx.directory, "out", args.caso);
+      mkdirSync(carpetaSalida, { recursive: true });
+      writeFileSync(join(carpetaSalida, "aprobacion.txt"), evidencia.data.texto, "utf-8");
+
+      // El PDF es un complemento: si falla, el .txt ya quedó escrito y solo se avisa
+      const advertencias: string[] = [];
+      let rutaPdf: string | null = null;
+      try {
+        const pdf = await generarPdfEvidencia(evidencia.data);
+        writeFileSync(join(carpetaSalida, "aprobacion.pdf"), pdf.bytes);
+        rutaPdf = `out/${args.caso}/aprobacion.pdf`;
+        if (pdf.caracteresReemplazados.length > 0) {
+          advertencias.push(
+            `El PDF no admite estos caracteres y se reemplazaron por "?": ${pdf.caracteresReemplazados.join(" ")}. El archivo .txt conserva el texto completo.`,
+          );
+        }
+      } catch (error) {
+        const motivo = error instanceof Error ? error.message : String(error);
+        advertencias.push(`No se pudo generar el PDF (${motivo}); la evidencia en .txt sí quedó escrita.`);
+      }
+
+      return respuestaOk({
+        ruta: `out/${args.caso}/aprobacion.txt`,
+        ruta_pdf: rutaPdf,
+        sha256: evidencia.data.sha256,
+        advertencias,
+      });
+    } catch (error) {
+      return errorInesperado("al generar la evidencia", error);
     }
   },
 };

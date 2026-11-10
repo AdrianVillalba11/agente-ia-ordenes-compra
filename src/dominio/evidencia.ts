@@ -31,6 +31,9 @@ import { NOMBRE_CASO_VALIDO, RUTA_SOLICITUDES } from "./paquete.ts";
 export type Evidencia = {
   texto: string; // lo que se escribe en aprobacion.txt (contenido + línea del hash)
   sha256: string; // hash del contenido, en hexadecimal
+  // Las partes por separado, para que el PDF pueda darles formato
+  encabezados: { de: string; para: string; fecha: string; asunto: string };
+  cuerpo: string;
 };
 
 // Campos de aprobacion.json que forman la evidencia (el PRD pide de, para, fecha, asunto y cuerpo)
@@ -75,5 +78,13 @@ export function construirEvidencia(caso: string, raizProyecto: string): Resultad
     .replace(/\r\n/g, "\n");
 
   const sha256 = calcularSha256(contenido);
-  return { ok: true, data: { texto: `${contenido}\n\n---\nsha256: ${sha256}\n`, sha256 } };
+  return {
+    ok: true,
+    data: {
+      texto: `${contenido}\n\n---\nsha256: ${sha256}\n`,
+      sha256,
+      encabezados: { de, para, fecha, asunto },
+      cuerpo: cuerpo.replace(/\r\n/g, "\n"),
+    },
+  };
 }
