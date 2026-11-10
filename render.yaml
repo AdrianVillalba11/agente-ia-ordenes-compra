@@ -1,0 +1,19 @@
+# Despliegue en Render (plan gratuito) a partir del Dockerfile del repositorio.
+# Los secretos NO están aquí: con sync: false Render los pide al crear el servicio y se guardan solo en su panel.
+services:
+  - type: web
+    name: agente-ia-ordenes-compra
+    runtime: docker
+    plan: free
+    # Render comprueba esta ruta para saber si el servicio está vivo
+    healthCheckPath: /api/health
+    envVars:
+      # Clave de la API del modelo (se escribe en el panel de Render, nunca en el repositorio)
+      - key: LLM_API_KEY
+        sync: false
+      # Clave de acceso al chat: evita que desconocidos gasten la cuota del modelo
+      - key: CLAVE_DE_ACCESO
+        sync: false
+      # Render pone un proxy delante: la IP real del visitante llega en x-forwarded-for
+      - key: CONFIAR_EN_PROXY
+        value: "true"

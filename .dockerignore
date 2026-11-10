@@ -1,0 +1,10 @@
+node_modules
+out
+.git
+.env
+.env.*
+!.env.example
+BITACORA.md
+MEJORAS.md
+Dockerfile
+.dockerignore
