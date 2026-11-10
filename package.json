@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "demo": "bun run demo.ts",
+    "humo": "bun run humo.ts",
     "dev": "bun run src/server.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",

@@ -13,7 +13,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { leerPaquete } from "../dominio/paquete.ts";
 import type { ContextoHerramienta } from "../esquemas.ts";
-import { analizarRespuesta, ejecutarHerramienta, listarHerramientas, type EjecucionHerramienta } from "./registro.ts";
+import { leer_paquete } from "./oc.ts";
+import {
+  analizarRespuesta,
+  definicionesParaModelo,
+  ejecutarHerramienta,
+  filtrarArgumentosDelModelo,
+  listarHerramientas,
+  resultadoParaModelo,
+  type EjecucionHerramienta,
+} from "./registro.ts";
 
 // ---------------------------------------------------------------------
 // BLOQUE 1 — Ayudantes de prueba
@@ -270,5 +279,112 @@ describe("log de llamadas", () => {
     const e = await ejecutarHerramienta("oc_leer_paquete", { caso: "sol-001" }, contexto(raiz));
     expect(e.ok).toBe(true);
     expect(e.resumen).toStartWith("Paquete de SOL-2026-001");
+  });
+});
+
+// ---------------------------------------------------------------------
+// BLOQUE 6 — Lo que ve el modelo
+// ---------------------------------------------------------------------
+
+describe("definicionesParaModelo", () => {
+  test("las 5 herramientas, en el orden del proceso, con su descripción", () => {
+    const definiciones = definicionesParaModelo();
+    expect(definiciones.map((d) => d.nombre)).toEqual([
+      "oc_leer_paquete",
+      "oc_validar",
+      "oc_construir_payload",
+      "oc_generar_evidencia",
+      "oc_crear",
+    ]);
+    expect(definiciones.every((d) => d.descripcion.length > 40)).toBe(true);
+  });
+
+  test("el modelo solo ve el argumento 'caso', con la forma exacta que necesita", () => {
+    for (const definicion of definicionesParaModelo()) {
+      expect(definicion.parametros).toEqual({
+        type: "object",
+        properties: {
+          caso: {
+            type: "string",
+            description: "Nombre de la carpeta del caso en fixtures/reto-03/solicitudes/, por ejemplo sol-001",
+          },
+        },
+        required: ["caso"],
+      });
+    }
+  });
+
+  test("ningún argumento oculto ni campo que el proveedor pudiera rechazar aparece en lo que ve el modelo", () => {
+    // Se mira solo lo que el modelo puede ENVIAR (los parámetros): "paquete" o "derivados"
+    // sí aparecen, con razón, en nombres y descripciones como "oc_leer_paquete".
+    for (const definicion of definicionesParaModelo()) {
+      const parametros = JSON.stringify(definicion.parametros);
+      for (const prohibido of ["paquete", "derivados", "payload", "confirmado", "$schema", "pattern", "additionalProperties"]) {
+        expect(parametros).not.toContain(prohibido);
+      }
+    }
+  });
+
+  test("los argumentos ocultos siguen existiendo en las herramientas (la demo y las pruebas los usan)", async () => {
+    const raiz = copiarFixtures();
+    await ejecutarHerramienta("oc_generar_evidencia", { caso: "sol-004" }, contexto(raiz));
+    const e = await ejecutarHerramienta("oc_crear", { caso: "sol-004", confirmado: true }, contexto(raiz));
+    expect(e.ok).toBe(false); // el argumento oculto se valida y se aplica: confirmar sin mostrar no vale
+    expect(e.requiereConfirmacion).toBe(true);
+  });
+});
+
+describe("filtrarArgumentosDelModelo", () => {
+  test("deja pasar 'caso' y descarta los argumentos ocultos o desconocidos", () => {
+    expect(
+      filtrarArgumentosDelModelo("oc_crear", { caso: "sol-004", confirmado: true, payload: {}, paquete: {}, derivados: {}, extra: 1 }),
+    ).toEqual({ caso: "sol-004" });
+  });
+
+  test("una herramienta desconocida o argumentos que no son un objeto dan un objeto vacío", () => {
+    expect(filtrarArgumentosDelModelo("oc_borrar", { caso: "sol-001" })).toEqual({});
+    for (const argumentos of ["sol-001", 42, null, undefined, ["sol-001"]]) {
+      expect(filtrarArgumentosDelModelo("oc_validar", argumentos)).toEqual({});
+    }
+  });
+});
+
+describe("resultadoParaModelo", () => {
+  test("el paquete se entrega sin los textos completos de la cotización y del correo de aprobación", async () => {
+    const respuesta = await leer_paquete.execute({ caso: "sol-001" }, { directory: RAIZ, sessionId: "prueba" });
+    const completo = JSON.parse(respuesta) as { data: { cotizacion: { texto?: string }; aprobacion: { texto?: string } } };
+    expect(completo.data.cotizacion.texto).toContain("COTIZACIÓN"); // el original sí los trae
+
+    const paraModelo = resultadoParaModelo("oc_leer_paquete", respuesta) as {
+      ok: boolean;
+      data: { cotizacion: Record<string, unknown>; aprobacion: Record<string, unknown>; solicitud: Record<string, unknown> };
+    };
+    expect(paraModelo.ok).toBe(true);
+    expect("texto" in paraModelo.data.cotizacion).toBe(false);
+    expect("texto" in paraModelo.data.aprobacion).toBe(false);
+    // Lo importante se conserva
+    expect(paraModelo.data.cotizacion.total).toBe(11400000);
+    expect(paraModelo.data.aprobacion.aprobado).toBe(true);
+    expect(paraModelo.data.solicitud.solicitud_id).toBe("SOL-2026-001");
+    // Y ocupa bastante menos
+    expect(JSON.stringify(paraModelo).length).toBeLessThan(respuesta.length);
+  });
+
+  test("no modifica el texto original de la respuesta", async () => {
+    const respuesta = await leer_paquete.execute({ caso: "sol-001" }, { directory: RAIZ, sessionId: "prueba" });
+    const copia = respuesta.slice();
+    resultadoParaModelo("oc_leer_paquete", respuesta);
+    expect(respuesta).toBe(copia);
+  });
+
+  test("las demás herramientas no se tocan", () => {
+    const respuesta = JSON.stringify({ ok: true, data: { apta: true, bloqueos: [], confirmaciones: [] } });
+    expect(resultadoParaModelo("oc_validar", respuesta)).toEqual(JSON.parse(respuesta));
+  });
+
+  test("una respuesta ilegible se convierte en un error claro", () => {
+    for (const rota of ["no es json", "[1,2]", "null", ""]) {
+      expect(resultadoParaModelo("oc_validar", rota)).toEqual({ ok: false, error: "La herramienta devolvió una respuesta ilegible." });
+    }
   });
 });

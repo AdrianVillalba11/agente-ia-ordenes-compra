@@ -24,6 +24,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { describirErrorZod } from "../dominio/archivos.ts";
 import { respuestaError, type ContextoHerramienta } from "../esquemas.ts";
+import type { DefinicionHerramienta } from "../llm/adapter.ts";
 import * as herramientasOc from "./oc.ts";
 
 // ---------------------------------------------------------------------
@@ -241,4 +242,82 @@ export async function ejecutarHerramienta(
     respuesta,
     requiereConfirmacion: final.requiere_confirmacion === true,
   };
+}
+
+// ---------------------------------------------------------------------
+// BLOQUE 4 — Lo que ve el modelo
+// ---------------------------------------------------------------------
+//
+// El modelo solo ve y puede enviar el argumento "caso". Los demás argumentos
+// del contrato del PRD siguen existiendo en el código (la demo y las pruebas los
+// usan), pero se le ocultan por dos razones:
+//   - paquete, derivados y payload solo sirven para contrastar contra el disco:
+//     mostrárselos solo le daría la oportunidad de alterar un valor y costaría tokens;
+//   - confirmado NO lo decide el modelo: lo decide el ciclo del agente, a partir
+//     de lo que escribió el usuario (ver src/agente/confirmacion.ts).
+
+const ARGUMENTOS_OCULTOS = new Set(["paquete", "derivados", "payload", "confirmado"]);
+
+// Deja solo lo esencial del esquema JSON (tipo, descripción, valores posibles, propiedades
+// y obligatorios), para que cualquier proveedor lo acepte sin quejarse de campos que no conoce.
+function simplificarEsquema(esquema: unknown): Record<string, unknown> {
+  const origen = typeof esquema === "object" && esquema !== null ? (esquema as Record<string, unknown>) : {};
+  const salida: Record<string, unknown> = {};
+
+  for (const clave of ["type", "description", "enum", "required"]) {
+    if (clave in origen) salida[clave] = origen[clave];
+  }
+  if (typeof origen.properties === "object" && origen.properties !== null) {
+    salida.properties = Object.fromEntries(
+      Object.entries(origen.properties as Record<string, unknown>).map(([nombre, propiedad]) => [nombre, simplificarEsquema(propiedad)]),
+    );
+  }
+  if (origen.items !== undefined) salida.items = simplificarEsquema(origen.items);
+  return salida;
+}
+
+// Nombre, descripción y argumentos de cada herramienta, tal como se le muestran al modelo
+export function definicionesParaModelo(): DefinicionHerramienta[] {
+  return [...REGISTRO.entries()].map(([nombre, herramienta]) => {
+    const visibles = Object.fromEntries(Object.entries(herramienta.args).filter(([argumento]) => !ARGUMENTOS_OCULTOS.has(argumento)));
+    return {
+      nombre,
+      descripcion: herramienta.description,
+      parametros: simplificarEsquema(z.toJSONSchema(z.object(visibles))),
+    };
+  });
+}
+
+// Deja pasar solo los argumentos visibles. Si el modelo envía uno oculto (por ejemplo
+// "confirmado: true" por su cuenta), simplemente se descarta.
+export function filtrarArgumentosDelModelo(nombre: string, argumentos: unknown): Record<string, unknown> {
+  const herramienta = REGISTRO.get(nombre);
+  if (herramienta === undefined || typeof argumentos !== "object" || argumentos === null || Array.isArray(argumentos)) return {};
+
+  const permitidos = new Set(Object.keys(herramienta.args).filter((argumento) => !ARGUMENTOS_OCULTOS.has(argumento)));
+  return Object.fromEntries(Object.entries(argumentos as Record<string, unknown>).filter(([argumento]) => permitidos.has(argumento)));
+}
+
+// El resultado de una herramienta, listo para el modelo. Se le quitan los textos completos
+// de la cotización y del correo de aprobación: no los necesita (las conclusiones ya vienen
+// como datos), cuestan tokens y son justo donde alguien podría esconder instrucciones.
+export function resultadoParaModelo(nombre: string, respuesta: string): Record<string, unknown> {
+  const ilegible = { ok: false, error: "La herramienta devolvió una respuesta ilegible." };
+  let crudo: unknown;
+  try {
+    crudo = JSON.parse(respuesta);
+  } catch {
+    return ilegible;
+  }
+  if (typeof crudo !== "object" || crudo === null || Array.isArray(crudo)) return ilegible;
+
+  const resultado = structuredClone(crudo) as Record<string, unknown>;
+  if (nombre === "oc_leer_paquete") {
+    const datos = resultado.data;
+    for (const parte of ["cotizacion", "aprobacion"]) {
+      const bloque = typeof datos === "object" && datos !== null ? (datos as Record<string, unknown>)[parte] : undefined;
+      if (typeof bloque === "object" && bloque !== null) delete (bloque as Record<string, unknown>).texto;
+    }
+  }
+  return resultado;
 }
